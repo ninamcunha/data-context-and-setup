@@ -1,6 +1,3 @@
-# TO CONTENT CREATORS: MIRROR UPDATES OF THIS FILE INTO
-# -`olist/seller.py`
-# - `olist/seller_updated.py`
 import pandas as pd
 import numpy as np
 from olist.data import Olist
@@ -138,75 +135,91 @@ class Seller:
             .sum()\
             .rename(columns={'price': 'sales'})
 
-
     def get_review_score(self):
         """
         Returns a DataFrame with:
-        'seller_id', 'share_of_five_stars', 'share_of_one_stars', 'review_score', 'cost_of_reviews'
+        'seller_id', 'share_of_five_stars', 'share_of_one_stars', 'review_score'
         """
+
+        # $CHALLENGIFY_BEGIN
         orders_reviews = self.order.get_review_score()
         orders_sellers = self.data['order_items'][['order_id', 'seller_id'
                                                    ]].drop_duplicates()
 
         df = orders_sellers.merge(orders_reviews, on='order_id')
-
-        df['cost_of_review'] = df.review_score.map({
-            1: 100,
-            2: 50,
-            3: 40,
-            4: 0,
-            5: 0
-        })
-
-        df_grouped_by_sellers = df.groupby('seller_id', as_index=False).agg({
+        res = df.groupby('seller_id', as_index=False).agg({
             'dim_is_one_star':
             'mean',
             'dim_is_five_star':
             'mean',
             'review_score':
-            'mean',
-            'cost_of_review':
-            'sum'
+            'mean'
         })
-        df_grouped_by_sellers.columns = [
+        # Rename columns
+        res.columns = [
             'seller_id', 'share_of_one_stars', 'share_of_five_stars',
-            'review_score', 'cost_of_reviews'
+            'review_score'
         ]
 
-        return df_grouped_by_sellers
+        return res
+        # $CHALLENGIFY_END
+    def get_profit(self):
+        """
+        Returns a DataFrame with:
+        'seller_id','revenue','cost_of_review','profits'
+        """
+        # Seller data
+        seller = self.data['seller'].copy
+        seller['revenue'] = 0.1*seller['sales'] + seller['months_on_olist']*80
 
+        # Orders data
+        orders = self.order.get_training_data()
+        orders.drop_duplicates(inplace=True)
+        orders['order_id'].drop_duplicates(inplace=True)
+        dict_tmp = {1: 100, 2: 50, 3: 40, 4: 0, 5: 0}
+        orders['cost_of_review']=orders['review_score'].map(dict_tmp)
+
+        # Order items data
+        ordem_items = self.data['order_items'].copy()
+        ordem_items=ordem_items['order_items'][['order_id', 'seller_id']]
+        ordem_items.drop_duplicates(inplace=True)
+        ordem_items.drop_duplicates(subset=['order_id'], inplace=True)
+
+        # Merging order and order item data (inner join)
+        orders=orders.merge(ordem_items,on='order_id')
+        # Calculating the sum by seller if of the orders dataset
+        orders_sum=orders.groupby('seller_id', as_index=False).sum()
+        # Merging order and seller dataset
+        order_seller=seller.merge(orders_sum, on='seller_id')
+        # Returing the variables we want: 'seller_id','revenue','cost_of_review','profits'
+
+        return order_seller.loc[:,['seller_id','revenue','cost_of_review','profits']]
 
     def get_training_data(self):
         """
         Returns a DataFrame with:
         ['seller_id', 'seller_city', 'seller_state', 'delay_to_carrier',
-        'wait_time', 'date_first_sale', 'date_last_sale', 'months_on_olist',
-        'share_of_one_stars', 'share_of_five_stars', 'review_score',
-        'cost_of_reviews', 'n_orders', 'quantity', 'quantity_per_order',
-        'sales', 'revenues', 'profits']
+        'wait_time', 'date_first_sale', 'date_last_sale', 'months_on_olist', 'share_of_one_stars',
+        'share_of_five_stars', 'review_score', 'n_orders', 'quantity',
+        'quantity_per_order', 'sales']
         """
+
         training_set =\
             self.get_seller_features()\
                 .merge(
                 self.get_seller_delay_wait_time(), on='seller_id'
-            ).merge(
+               ).merge(
                 self.get_active_dates(), on='seller_id'
-            ).merge(
-                self.get_review_score(), on='seller_id'
-            ).merge(
+               ).merge(
                 self.get_quantity(), on='seller_id'
-            ).merge(
+               ).merge(
                 self.get_sales(), on='seller_id'
-            )
+               ).merge(
+                self.get_profit(), on='seller_id'
+               )
 
-        # Add seller economics (revenues, profits)
-        olist_monthly_fee = 80
-        olist_sales_cut = 0.1
-
-        training_set['revenues'] = training_set['months_on_olist'] * olist_monthly_fee\
-            + olist_sales_cut * training_set['sales']
-
-        training_set['profits'] = training_set['revenues'] - training_set[
-            'cost_of_reviews']
+        if self.get_review_score() is not None:
+            training_set = training_set.merge(self.get_review_score(),
+                                              on='seller_id')
 
         return training_set
